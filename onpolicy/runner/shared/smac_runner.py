@@ -14,28 +14,33 @@ class SMACRunner(Runner):
         super(SMACRunner, self).__init__(config)
 
     def run(self):
-        self.warmup()   
-
+        self.warmup()
         start = time.time()
         episodes = int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
-
         last_battles_game = np.zeros(self.n_rollout_threads, dtype=np.float32)
         last_battles_won = np.zeros(self.n_rollout_threads, dtype=np.float32)
 
         for episode in range(episodes):
+
             if self.use_linear_lr_decay:
                 self.trainer.policy.lr_decay(episode, episodes)
-
+            cum_reward = 0
             for step in range(self.episode_length):
                 # Sample actions
-                values, actions, action_log_probs, rnn_states, rnn_states_critic = self.collect(step)
-                    
-                # Obser reward and next obs
-                obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions)
+                node_features = self.envs.get_node_features()
+                edge_indices = self.envs.get_enemy_visibility_edge_index()
 
+
+                values, actions, action_log_probs, rnn_states, rnn_states_critic = self.collect(step)
+
+                # Obser reward and next obs
+
+                obs, share_obs, rewards, dones, infos, available_actions = self.envs.step(actions)
+                cum_reward += np.mean(rewards)
+                #print(rewards)
                 data = obs, share_obs, rewards, dones, infos, available_actions, \
                        values, actions, action_log_probs, \
-                       rnn_states, rnn_states_critic 
+                       rnn_states, rnn_states_critic, node_features, edge_indices
                 
                 # insert data into buffer
                 self.insert(data)
@@ -53,12 +58,13 @@ class SMACRunner(Runner):
             # log information
             if episode % self.log_interval == 0:
                 end = time.time()
-                print("\n Map {} Algo {} Exp {} updates {}/{} episodes, total num timesteps {}/{}, FPS {}.\n"
+                print("\n Map {} Algo {} Exp {} updates {}/{} episodes, cum_reward {}, total num timesteps {}/{}, FPS {}.\n"
                         .format(self.all_args.map_name,
                                 self.algorithm_name,
                                 self.experiment_name,
                                 episode,
                                 episodes,
+                                cum_reward,
                                 total_num_steps,
                                 self.num_env_steps,
                                 int(total_num_steps / (end - start))))
@@ -98,6 +104,8 @@ class SMACRunner(Runner):
     def warmup(self):
         # reset env
         obs, share_obs, available_actions = self.envs.reset()
+        node_features = self.envs.get_node_features()
+        edge_indices = self.envs.get_enemy_visibility_edge_index()
 
         # replay buffer
         if not self.use_centralized_V:
@@ -106,6 +114,13 @@ class SMACRunner(Runner):
         self.buffer.share_obs[0] = share_obs.copy()
         self.buffer.obs[0] = obs.copy()
         self.buffer.available_actions[0] = available_actions.copy()
+
+        A = np.zeros((self.num_nodes, self.num_nodes), dtype=int)
+        for start, end in np.array(edge_indices).T:  # .T는 전치를 취해주어 각 열을 순회할 수 있게 함
+            A[start, end] = 1
+        self.buffer.edge_indices[0] = A
+        self.buffer.node_features[0] = node_features
+
 
     @torch.no_grad()
     def collect(self, step):
@@ -128,13 +143,18 @@ class SMACRunner(Runner):
 
     def insert(self, data):
         obs, share_obs, rewards, dones, infos, available_actions, \
-        values, actions, action_log_probs, rnn_states, rnn_states_critic = data
+        values, actions, action_log_probs, rnn_states, rnn_states_critic, node_features, edge_indices = data
+
+        A = np.zeros((self.num_nodes, self.num_nodes), dtype=int)
+        for start, end in np.array(edge_indices).T:  # .T는 전치를 취해주어 각 열을 순회할 수 있게 함
+            A[start, end] = 1
+        # self.buffer.edge_indices[0] = A
+        # self.buffer.node_features[0] = node_features
 
         dones_env = np.all(dones, axis=1)
 
         rnn_states[dones_env == True] = np.zeros(((dones_env == True).sum(), self.num_agents, self.recurrent_N, self.hidden_size), dtype=np.float32)
         rnn_states_critic[dones_env == True] = np.zeros(((dones_env == True).sum(), self.num_agents, *self.buffer.rnn_states_critic.shape[3:]), dtype=np.float32)
-
         masks = np.ones((self.n_rollout_threads, self.num_agents, 1), dtype=np.float32)
         masks[dones_env == True] = np.zeros(((dones_env == True).sum(), self.num_agents, 1), dtype=np.float32)
 
@@ -146,9 +166,8 @@ class SMACRunner(Runner):
         
         if not self.use_centralized_V:
             share_obs = obs
-
         self.buffer.insert(share_obs, obs, rnn_states, rnn_states_critic,
-                           actions, action_log_probs, values, rewards, masks, bad_masks, active_masks, available_actions)
+                           actions, action_log_probs, values, rewards, masks, bad_masks = bad_masks, active_masks = active_masks,available_actions= available_actions, node_features = node_features, edge_indices = A)
 
     def log_train(self, train_infos, total_num_steps):
         train_infos["average_step_rewards"] = np.mean(self.buffer.rewards)

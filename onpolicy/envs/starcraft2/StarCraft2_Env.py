@@ -317,6 +317,8 @@ class StarCraft2Env(MultiAgentEnv):
         self.action_space = []
         self.observation_space = []
         self.share_observation_space = []
+
+
         for i in range(self.n_agents):
             self.action_space.append(Discrete(self.n_actions))
             self.observation_space.append(self.get_obs_size())
@@ -378,13 +380,15 @@ class StarCraft2Env(MultiAgentEnv):
             np.transpose(np.array(list(map_info.terrain_height.data))
                          .reshape(self.map_x, self.map_y)), 1) / 255
 
+
+
+
     def reset(self):
         """Reset the environment. Required after each full episode.
         Returns initial observations and states.
         """
         self._episode_steps = 0
         if self._episode_count == 0:
-            # Launch StarCraft II
             self._launch()
         else:
             self._restart()
@@ -432,7 +436,7 @@ class StarCraft2Env(MultiAgentEnv):
 
             local_obs = self.stacked_local_obs.reshape(self.n_agents, -1)
             global_state = self.stacked_global_state.reshape(self.n_agents, -1)
-
+        self.get_agent_type_of_envs()
         return local_obs, global_state, available_actions
 
     def _restart(self):
@@ -1851,6 +1855,125 @@ class StarCraft2Env(MultiAgentEnv):
         else:
             # only no-op allowed
             return [1] + [0] * (self.n_actions - 1)
+
+    def get_agent_type_of_envs(self):
+        agent_type_ids = list()
+        type_alliance = list()
+        for agent_id, _ in self.agents.items():
+            agent = self.get_unit_by_id(agent_id)
+            agent_type_ids.append(str(agent.health_max) + str(agent.shield_max) + str(agent.radius))
+            type_alliance.append(
+                [str(agent.health_max) + str(agent.shield_max) + str(agent.radius), agent.alliance])
+        for e_id, e_unit in self.enemies.items():
+            enemy = list(self.enemies.items())[e_id][1]
+            agent_type_ids.append(str(enemy.health_max) + str(enemy.shield_max) + str(enemy.radius))
+            type_alliance.append(
+                [str(enemy.health_max) + str(enemy.shield_max) + str(enemy.radius), enemy.alliance])
+        agent_types_list = list(set(agent_type_ids))
+        type_alliance_set = list()
+        for x in type_alliance:
+            if x not in type_alliance_set:
+                type_alliance_set.append(x)
+        #print(agent_types_list)
+        # for id in agent_types_list:
+        #     print("id : ", id, "count : ", agent_type_ids.count(id))
+
+
+        self.generate_num_unit_types(len(agent_types_list), agent_types_list)
+    def generate_num_unit_types(self, num_total_unit_types, unit_type_ids):
+        self.unit_type_ids = sorted(unit_type_ids)
+        self.num_total_unit_types = num_total_unit_types
+        self.n_node_features = 4 + 6 + 6 + self.num_total_unit_types + 1-8
+
+    def get_node_features(self):
+        node_feature = np.array([self.get_node_feature(node_id) for node_id in range(0,
+                                                                                      self.n_agents + self.n_enemies)])
+
+
+        return node_feature
+    def get_node_feature(self, node_id):
+        " 1st moment"
+        " position : x_position, y_position"
+        " health : "
+        " shield : "
+        " type : "
+        " movement_feature"
+        move_avail_feats = np.zeros(4, dtype=np.float32)
+        pos_feats = np.zeros(2, dtype=np.float32)
+        health_and_shield_feats = np.zeros(2, dtype=np.float32)
+        unit_type_feats = np.zeros(self.num_total_unit_types, dtype=np.float32)
+        if node_id < self.n_agents:
+            unit = self.get_unit_by_id(node_id)
+        else:
+            node_id = node_id - self.n_agents
+            unit = list(self.enemies.items())[node_id][1]
+        if unit.health > 0:
+            if self.can_move(unit, Direction.NORTH):
+                move_avail_feats[0] = 1
+            if self.can_move(unit, Direction.SOUTH):
+                move_avail_feats[1] = 1
+            if self.can_move(unit, Direction.EAST):
+                move_avail_feats[2] = 1
+            if self.can_move(unit, Direction.WEST):
+                move_avail_feats[3] = 1
+            self.position_scaling_factor = 30
+            pos_feats[0] = unit.pos.x   / self.position_scaling_factor
+            pos_feats[1] = unit.pos.y   / self.position_scaling_factor
+
+            health_and_shield_feats[0] = unit.health / unit.health_max
+            if unit.shield_max == 0:
+                health_and_shield_feats[1] = 0
+            else:
+                health_and_shield_feats[1] = unit.shield / unit.shield_max
+
+        unit_type_feats[self.unit_type_ids.index(str(unit.health_max) +
+                                                 str(unit.shield_max) +
+                                                 str(unit.radius))] = 1
+        alliance_index = 0 if unit.alliance == 1 else 1
+
+        if alliance_index == 0:
+            alliance_feats = np.zeros(1, dtype=np.float32)
+        else:
+            alliance_feats = np.ones(1,  dtype=np.float32)
+
+        node_feature = np.concatenate((unit_type_feats, move_avail_feats, pos_feats, health_and_shield_feats, alliance_feats))
+        node_feature = node_feature.tolist()
+
+        return node_feature
+
+    def get_env_info(self):
+        env_info = super().get_env_info()
+        env_info["node_features"] = 4 + 6 + 6 + self.num_total_unit_types + 1-8
+        env_info["agent_features"] = self.ally_state_attr_names
+        env_info["enemy_features"] = self.enemy_state_attr_names
+        env_info["n_enemies"] = self.n_enemies
+        env_info["n_agents"] = self.n_agents
+        return env_info
+
+    def get_enemy_visibility_edge_index(self):
+        edge_index = [[], []]
+        for agent_id in range(self.n_agents):
+            edge_index[0].append(agent_id)
+            edge_index[1].append(agent_id)
+
+        for agent_id in range(self.n_agents):
+            current_agent = self.get_unit_by_id(agent_id)
+            if current_agent.health > 0:  # it agent not dead
+                x = current_agent.pos.x
+                y = current_agent.pos.y
+                sight_range = self.unit_sight_range(agent_id)
+
+                # Enemies
+                for e_id, e_unit in self.enemies.items():
+                    e_x = e_unit.pos.x
+                    e_y = e_unit.pos.y
+                    dist = self.distance(x, y, e_x, e_y)
+                    if dist < sight_range and e_unit.health > 0:
+                        # visible and alive
+                        edge_index[0].append(agent_id)
+                        edge_index[1].append(e_id + self.n_agents)
+
+        return edge_index
 
     def get_avail_actions(self):
         """Returns the available actions of all agents in a list."""

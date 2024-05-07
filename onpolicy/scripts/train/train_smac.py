@@ -19,6 +19,7 @@ def make_train_env(all_args):
         def init_env():
             if all_args.env_name == "StarCraft2":
                 env = StarCraft2Env(all_args)
+                 # SH.rev(240507)
             else:
                 print("Can not support the " + all_args.env_name + "environment.")
                 raise NotImplementedError
@@ -86,6 +87,11 @@ def main(args):
     elif all_args.algorithm_name == "ippo":
         print("u are choosing to use ippo, we set use_centralized_V to be False")
         all_args.use_centralized_V = False
+    elif all_args.algorithm_name == "gmappo":
+        print("u are choosing to use gmappo, we set use_recurrent_policy & use_naive_recurrent_policy to be False")
+        all_args.use_recurrent_policy = False
+        all_args.use_naive_recurrent_policy = False
+        all_args.use_glcn = True
     else:
         raise NotImplementedError
 
@@ -145,13 +151,17 @@ def main(args):
     # env
     envs = make_train_env(all_args)
     eval_envs = make_eval_env(all_args) if all_args.use_eval else None
+    envs.reset()
     num_agents = get_map_params(all_args.map_name)["n_agents"]
-
+    num_nodes = num_agents+get_map_params(all_args.map_name)["n_enemies"]
+    n_node_features= envs.get_node_feature_size()
     config = {
         "all_args": all_args,
         "envs": envs,
         "eval_envs": eval_envs,
         "num_agents": num_agents,
+        "num_nodes": num_nodes,
+        'n_node_features': n_node_features,
         "device": device,
         "run_dir": run_dir
     }

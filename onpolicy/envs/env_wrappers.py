@@ -72,7 +72,6 @@ class ShareVecEnv(ABC):
     def step_wait(self):
         """
         Wait for the step taken with step_async().
-
         Returns (obs, rews, dones, infos):
          - obs: an array of observations, or a dict of
                 arrays of observations.
@@ -81,6 +80,7 @@ class ShareVecEnv(ABC):
          - infos: a sequence of info objects
         """
         pass
+
 
     def close_extras(self):
         """
@@ -684,6 +684,7 @@ class DummyVecEnv(ShareVecEnv):
         self.actions = None
         return obs, rews, dones, infos
 
+
     def reset(self):
         obs = [env.reset() for env in self.envs]
         return np.array(obs)
@@ -735,6 +736,15 @@ class ShareDummyVecEnv(ShareVecEnv):
         obs, share_obs, available_actions = map(np.array, zip(*results))
         return obs, share_obs, available_actions
 
+    def get_enemy_visibility_edge_index(self):
+        edge_index = [env.get_enemy_visibility_edge_index() for env in self.envs]
+        return edge_index
+    def get_node_feature_size(self):
+        node_feature_size = self.envs[0].n_node_features
+        return node_feature_size
+    def get_node_features(self):
+        node_features = [env.get_node_features() for env in self.envs]
+        return node_features
     def close(self):
         for env in self.envs:
             env.close()

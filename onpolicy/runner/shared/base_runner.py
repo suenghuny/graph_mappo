@@ -18,9 +18,12 @@ class Runner(object):
 
         self.all_args = config['all_args']
         self.envs = config['envs']
+
         self.eval_envs = config['eval_envs']
         self.device = config['device']
         self.num_agents = config['num_agents']
+        self.num_nodes = config['num_nodes']
+        self.node_feature_size = config['n_node_features']
         if config.__contains__("render_envs"):
             self.render_envs = config['render_envs']       
 
@@ -86,7 +89,10 @@ class Runner(object):
                                         self.num_agents,
                                         self.envs.observation_space[0],
                                         share_observation_space,
-                                        self.envs.action_space[0])
+                                        self.envs.action_space[0],
+                                         self.num_nodes,
+                                         self.node_feature_size,
+                                         )
 
     def run(self):
         """Collect training data, perform training updates, and evaluate policy."""

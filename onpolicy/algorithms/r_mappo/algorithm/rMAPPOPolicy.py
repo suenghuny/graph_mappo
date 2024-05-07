@@ -24,7 +24,6 @@ class R_MAPPOPolicy:
         self.obs_space = obs_space
         self.share_obs_space = cent_obs_space
         self.act_space = act_space
-
         self.actor = R_Actor(args, self.obs_space, self.act_space, self.device)
         self.critic = R_Critic(args, self.share_obs_space, self.device)
 
@@ -63,6 +62,12 @@ class R_MAPPOPolicy:
         :return action_log_probs: (torch.Tensor) log probabilities of chosen actions.
         :return rnn_states_actor: (torch.Tensor) updated actor network RNN states.
         :return rnn_states_critic: (torch.Tensor) updated critic network RNN states.
+        """
+        #print(obs.shape, rnn_states_actor.shape, masks.shape, available_actions.shape)
+        """
+        obs.shape: num_agent, obs_feature_size
+        rnn_states_actor.shape: num_agent, 1, rnn_hidden_state
+        masks: num_agent, 1
         """
         actions, action_log_probs, rnn_states_actor = self.actor(obs,
                                                                  rnn_states_actor,

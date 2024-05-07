@@ -21,7 +21,7 @@ class SharedReplayBuffer(object):
     :param act_space: (gym.Space) action space for agents.
     """
 
-    def __init__(self, args, num_agents, obs_space, cent_obs_space, act_space):
+    def __init__(self, args, num_agents, obs_space, cent_obs_space, act_space, num_nodes, node_feature_size):
         self.episode_length = args.episode_length
         self.n_rollout_threads = args.n_rollout_threads
         self.hidden_size = args.hidden_size
@@ -70,6 +70,11 @@ class SharedReplayBuffer(object):
         self.rewards = np.zeros(
             (self.episode_length, self.n_rollout_threads, num_agents, 1), dtype=np.float32)
 
+        self.node_features = np.zeros(
+            (self.episode_length, self.n_rollout_threads, num_nodes, node_feature_size), dtype=np.float32)
+        self.edge_indices = np.zeros(
+            (self.episode_length, self.n_rollout_threads, num_nodes, num_nodes), dtype=np.float32)
+        #print(self.episode_length)
         self.masks = np.ones((self.episode_length + 1, self.n_rollout_threads, num_agents, 1), dtype=np.float32)
         self.bad_masks = np.ones_like(self.masks)
         self.active_masks = np.ones_like(self.masks)
@@ -77,7 +82,9 @@ class SharedReplayBuffer(object):
         self.step = 0
 
     def insert(self, share_obs, obs, rnn_states_actor, rnn_states_critic, actions, action_log_probs,
-               value_preds, rewards, masks, bad_masks=None, active_masks=None, available_actions=None):
+               value_preds, rewards, masks, node_features, edge_indices,
+
+               bad_masks=None, active_masks=None, available_actions=None):
         """
         Insert data into the buffer.
         :param share_obs: (argparse.Namespace) arguments containing relevant model, policy, and env information.
@@ -102,6 +109,11 @@ class SharedReplayBuffer(object):
         self.value_preds[self.step] = value_preds.copy()
         self.rewards[self.step] = rewards.copy()
         self.masks[self.step + 1] = masks.copy()
+
+
+        self.node_features[self.step] = node_features.copy()
+        self.edge_indices[self.step] = edge_indices.copy()
+
         if bad_masks is not None:
             self.bad_masks[self.step + 1] = bad_masks.copy()
         if active_masks is not None:
@@ -155,10 +167,14 @@ class SharedReplayBuffer(object):
         self.masks[0] = self.masks[-1].copy()
         self.bad_masks[0] = self.bad_masks[-1].copy()
         self.active_masks[0] = self.active_masks[-1].copy()
+        self.node_features[0] = self.node_features[-1].copy()
+        self.edge_indices[0] = self.edge_indices[-1].copy()
+
         if self.available_actions is not None:
             self.available_actions[0] = self.available_actions[-1].copy()
 
     def chooseafter_update(self):
+
         """Copy last timestep data to first index. This method is used for Hanabi."""
         self.rnn_states[0] = self.rnn_states[-1].copy()
         self.rnn_states_critic[0] = self.rnn_states_critic[-1].copy()
